@@ -1,1 +1,1 @@
-# telegram-bot-sub-check
+# Telegram Bot with Subscription Check
