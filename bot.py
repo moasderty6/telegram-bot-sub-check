@@ -1,6 +1,6 @@
 import os
 import shutil
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 import http.server, socketserver
@@ -9,7 +9,7 @@ import threading
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أرسل رابط الفيديو وسأقوم بتنزيله لك!")
+    await update.message.reply_text("👋 أهلاً بك! أرسل رابط الفيديو وسأقوم بتنزيله لك بعد التحقق من اشتراكك في القناة.")
 
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -18,7 +18,14 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
         if member.status in ['left', 'kicked']:
-            await update.message.reply_text("🚫 يجب الاشتراك في القناة أولاً لمتابعة استخدام البوت:\n" + channel_username)
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("اشترك الآن 🔔", url="https://t.me/p2p_LRN")]
+            ])
+            await update.message.reply_text(
+                "🚫 عذرًا، لا يمكنك استخدام البوت قبل الاشتراك في القناة.\n"
+                "يرجى الضغط على الزر أدناه للاشتراك ثم إعادة إرسال الرابط.",
+                reply_markup=keyboard
+            )
             return
     except Exception as e:
         await update.message.reply_text(f"⚠️ حدث خطأ أثناء التحقق من الاشتراك:\n{e}")
@@ -33,7 +40,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     ydl_opts = {
         'outtmpl': 'downloads/video.%(ext)s',
-        'max_filesize': 50*1024*1024,
+        'max_filesize': 50 * 1024 * 1024,
         'format': 'best',
         'cookiefile': 'cookies.txt',
     }
