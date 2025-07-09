@@ -33,7 +33,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     url = update.message.text.strip()
 
-    if "youtube.com" in url:
+    if "youtube.com" in url or "youtu.be" in url:
         cookie_source = "/etc/secrets/cookies_youtube.txt"
     elif "tiktok.com" in url:
         cookie_source = "/etc/secrets/cookies_tiktok.txt"
