@@ -22,26 +22,37 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("اشترك الآن 🔔", url="https://t.me/p2p_LRN")]
             ])
             await update.message.reply_text(
-                "🚫 عذرًا، لا يمكنك استخدام البوت قبل الاشتراك في القناة.\n"
-                "يرجى الضغط على الزر أدناه للاشتراك ثم إعادة إرسال الرابط.",
+                "🚫 لا يمكنك استخدام البوت قبل الاشتراك في القناة.\n"
+                "اضغط على الزر للاشتراك ثم أعد إرسال الرابط.",
                 reply_markup=keyboard
             )
             return
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ حدث خطأ أثناء التحقق من الاشتراك:\n{e}")
-        return
-
-    try:
-        shutil.copyfile('/etc/secrets/cookies.txt', 'cookies.txt')
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ خطأ أثناء نسخ الكوكيز: {e}")
+    except Exception as error:
+        await update.message.reply_text(f"⚠️ خطأ في التحقق من الاشتراك:\n{error}")
         return
 
     url = update.message.text.strip()
+
+    if "youtube.com" in url:
+        cookie_source = "/etc/secrets/cookies_youtube.txt"
+    elif "tiktok.com" in url:
+        cookie_source = "/etc/secrets/cookies_tiktok.txt"
+    elif "facebook.com" in url:
+        cookie_source = "/etc/secrets/cookies_facebook.txt"
+    elif "x.com" in url or "twitter.com" in url:
+        cookie_source = "/etc/secrets/cookies_twitter.txt"
+    else:
+        cookie_source = "/etc/secrets/cookies_instagram.txt"
+
+    try:
+        shutil.copyfile(cookie_source, 'cookies.txt')
+    except Exception as copy_error:
+        await update.message.reply_text(f"⚠️ لم يتم العثور على ملف الكوكيز:\n{copy_error}")
+        return
+
     ydl_opts = {
         'outtmpl': 'downloads/video.%(ext)s',
-        'max_filesize': 50 * 1024 * 1024,
-        'format': 'best',
+        'format': 'mp4/best',
         'cookiefile': 'cookies.txt',
     }
     os.makedirs('downloads', exist_ok=True)
@@ -51,8 +62,8 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             path = ydl.prepare_filename(info)
             await update.message.reply_video(video=open(path, 'rb'))
             os.remove(path)
-    except Exception as e:
-        await update.message.reply_text(f"❌ فشل التنزيل: {e}")
+    except Exception as dl_error:
+        await update.message.reply_text(f"❌ فشل التنزيل: {dl_error}")
 
 def start_http_server():
     PORT = 8080
