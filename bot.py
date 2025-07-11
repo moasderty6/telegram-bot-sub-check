@@ -33,7 +33,6 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     url = update.message.text.strip()
 
-    # اختيار ملف الكوكيز حسب الرابط
     if "youtube.com" in url or "youtu.be" in url:
         cookie_source = "/etc/secrets/cookies_youtube.txt"
     elif "tiktok.com" in url:
@@ -51,30 +50,21 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ لم يتم العثور على ملف الكوكيز:\n{copy_error}")
         return
 
-    # ⬅️ أرسل رسالة انتظار
-    waiting_msg = await update.message.reply_text("📥 جاري تنزيل الفيديو... يرجى الانتظار...")
-
     ydl_opts = {
         'outtmpl': 'downloads/video.%(ext)s',
         'format': 'mp4/best',
         'cookiefile': 'cookies.txt',
     }
     os.makedirs('downloads', exist_ok=True)
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             path = ydl.prepare_filename(info)
             await update.message.reply_video(video=open(path, 'rb'))
             os.remove(path)
-
-            # ⬅️ حذف رسالة "جاري التنزيل"
-            await waiting_msg.delete()
-
     except Exception as dl_error:
-        await waiting_msg.edit_text(f"❌ فشل التنزيل: {dl_error}")
+        await update.message.reply_text(f"❌ فشل التنزيل: {dl_error}")
 
-# تشغيل سيرفر http على بورت 8080
 def start_http_server():
     PORT = 8080
     Handler = http.server.SimpleHTTPRequestHandler
