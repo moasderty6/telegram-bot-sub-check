@@ -1,25 +1,48 @@
 import os
 import shutil
+import logging
+import http.server
+import socketserver
+import threading
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
-import http.server, socketserver
-import threading
 
+# --- إعدادات أساسية ---
+# استدعاء التوكن من متغيرات البيئة (الأفضل للنشر على Render)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+# اسم المستخدم لقناة الاشتراك الإجباري
+CHANNEL_USERNAME = "@p2p_LRN"
+# مسار الكوكيز في Render (إذا كنت تستخدم secrets)
+COOKIES_PATH = "/etc/secrets/"
+
+# إعداد تسجيل الأخطاء لعرض معلومات مفيدة
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- دوال البوت الأساسية ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 أهلاً بك! أرسل رابط الفيديو وسأقوم بتنزيله لك بعد التحقق من اشتراكك في القناة.")
+    """إرسال رسالة ترحيبية عند إرسال المستخدم للأمر /start."""
+    user = update.effective_user
+    await update.message.reply_html(
+        f"👋 أهلاً بك يا {user.mention_html()}!\n\n"
+        "أرسل رابط الفيديو وسأقوم بتنزيله لك بعد التحقق من اشتراكك في القناة."
+    )
 
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """الدالة الرئيسية لتحميل ومعالجة الفيديو."""
     user_id = update.effective_user.id
-    channel_username = "@p2p_LRN"
 
+    # 1. التحقق من اشتراك المستخدم في القناة
     try:
-        member = await context.bot.get_chat_member(chat_id=channel_username, user_id=user_id)
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         if member.status in ['left', 'kicked']:
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("اشترك الآن 🔔", url="https://t.me/p2p_LRN")]
+                [InlineKeyboardButton("اشترك الآن 🔔", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")]
             ])
             await update.message.reply_text(
                 "🚫 لا يمكنك استخدام البوت قبل الاشتراك في القناة.\n"
@@ -28,65 +51,105 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     except Exception as error:
-        await update.message.reply_text(f"⚠️ خطأ في التحقق من الاشتراك:\n{error}")
+        logger.error(f"Error checking subscription for user {user_id}: {error}")
+        await update.message.reply_text(f"⚠️ حدث خطأ أثناء التحقق من اشتراكك في القناة.")
         return
 
+    # 2. معالجة الرابط وإعدادات التحميل
     url = update.message.text.strip()
+    waiting_msg = await update.message.reply_text("⏳ جاري معالجة الرابط...")
 
-    # اختيار ملف الكوكيز حسب الرابط
+    # اختيار ملف الكوكيز المناسب
+    cookie_source = ""
     if "youtube.com" in url or "youtu.be" in url:
-        cookie_source = "/etc/secrets/cookies_youtube.txt"
+        cookie_source = os.path.join(COOKIES_PATH, "cookies_youtube.txt")
     elif "tiktok.com" in url:
-        cookie_source = "/etc/secrets/cookies_tiktok.txt"
-    elif "facebook.com" in url:
-        cookie_source = "/etc/secrets/cookies_facebook.txt"
+        cookie_source = os.path.join(COOKIES_PATH, "cookies_tiktok.txt")
+    elif "facebook.com" in url or "fb.watch" in url:
+        cookie_source = os.path.join(COOKIES_PATH, "cookies_facebook.txt")
     elif "x.com" in url or "twitter.com" in url:
-        cookie_source = "/etc/secrets/cookies_twitter.txt"
+        cookie_source = os.path.join(COOKIES_PATH, "cookies_twitter.txt")
+    elif "instagram.com" in url:
+        cookie_source = os.path.join(COOKIES_PATH, "cookies_instagram.txt")
+    
+    temp_cookie_file = f"cookies_{user_id}.txt"
+    if cookie_source and os.path.exists(cookie_source):
+        shutil.copyfile(cookie_source, temp_cookie_file)
     else:
-        cookie_source = "/etc/secrets/cookies_instagram.txt"
+        temp_cookie_file = None # لا تستخدم الكوكيز إذا لم يكن الملف موجودًا
 
-    try:
-        shutil.copyfile(cookie_source, 'cookies.txt')
-    except Exception as copy_error:
-        await update.message.reply_text(f"⚠️ لم يتم العثور على ملف الكوكيز:\n{copy_error}")
-        return
-
-    # ⬅️ أرسل رسالة انتظار
-    waiting_msg = await update.message.reply_text("📥 جاري تنزيل الفيديو... يرجى الانتظار...")
-
-    ydl_opts = {
-        'outtmpl': 'downloads/video.%(ext)s',
-        'format': 'mp4/best',
-        'cookiefile': 'cookies.txt',
-    }
+    # اسم ملف فريد لكل عملية تنزيل لمنع التضارب بين المستخدمين
+    # <--- تعديل: استخدام اسم فريد للملف
+    output_template = f'downloads/{user_id}_%(id)s.%(ext)s'
     os.makedirs('downloads', exist_ok=True)
 
+    ydl_opts = {
+        # <--- تعديل: الصيغة الأفضل والوحيدة التي تعمل مع يوتيوب بشكل موثوق
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': output_template,
+        'cookiefile': temp_cookie_file,
+        'noplaylist': True,
+        'quiet': True,
+        'merge_output_format': 'mp4', # التأكد من أن الملف النهائي بصيغة mp4
+    }
+
+    video_path = None
     try:
+        await waiting_msg.edit_text("📥 جاري تنزيل الفيديو... قد يستغرق بعض الوقت.")
+
+        # 3. بدء عملية التحميل الفعلية
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            path = ydl.prepare_filename(info)
-            await update.message.reply_video(video=open(path, 'rb'))
-            os.remove(path)
+            video_path = ydl.prepare_filename(info)
 
-            # ⬅️ حذف رسالة "جاري التنزيل"
-            await waiting_msg.delete()
+        if not video_path or not os.path.exists(video_path):
+             raise ValueError("فشل استخراج مسار الملف بعد التنزيل.")
+
+        await waiting_msg.edit_text("📤 تم التنزيل بنجاح، جاري رفع الفيديو إليك...")
+        
+        # 4. إرسال الفيديو للمستخدم
+        with open(video_path, 'rb') as video_file:
+            await update.message.reply_video(video=video_file, supports_streaming=True)
+        
+        await waiting_msg.delete()
 
     except Exception as dl_error:
-        await waiting_msg.edit_text(f"❌ فشل التنزيل: {dl_error}")
+        logger.error(f"Download failed for URL {url}: {dl_error}")
+        error_text = str(dl_error)
+        await waiting_msg.edit_text(f"❌ فشل التنزيل:\n\n`{error_text}`", parse_mode='Markdown')
 
-# تشغيل سيرفر http على بورت 8080
+    finally:
+        # 5. التنظيف وحذف الملفات المؤقتة دائمًا
+        if video_path and os.path.exists(video_path):
+            os.remove(video_path)
+        if temp_cookie_file and os.path.exists(temp_cookie_file):
+            os.remove(temp_cookie_file)
+
+
 def start_http_server():
+    """تشغيل سيرفر http بسيط لتلبية متطلبات منصة Render للبقاء نشطًا."""
     PORT = 8080
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print("Serving at port", PORT)
+        logger.info(f"Serving at port {PORT}")
         httpd.serve_forever()
 
 def main():
+    """الدالة الرئيسية لإعداد وتشغيل البوت."""
+    if not BOT_TOKEN:
+        logger.critical("BOT_TOKEN not found in environment variables!")
+        return
+
+    # تشغيل سيرفر http في خيط منفصل
     threading.Thread(target=start_http_server, daemon=True).start()
+    
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # إضافة معالجات الأوامر والرسائل
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
+    
+    logger.info("Bot is starting...")
     app.run_polling()
 
 if __name__ == '__main__':
