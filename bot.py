@@ -76,22 +76,33 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cookie_source and os.path.exists(cookie_source):
         shutil.copyfile(cookie_source, temp_cookie_file)
     else:
-        temp_cookie_file = None # لا تستخدم الكوكيز إذا لم يكن الملف موجودًا
+        temp_cookie_file = None
 
-    # اسم ملف فريد لكل عملية تنزيل لمنع التضارب بين المستخدمين
-    # <--- تعديل: استخدام اسم فريد للملف
     output_template = f'downloads/{user_id}_%(id)s.%(ext)s'
     os.makedirs('downloads', exist_ok=True)
 
-    ydl_opts = {
-        # <--- تعديل: الصيغة الأفضل والوحيدة التي تعمل مع يوتيوب بشكل موثوق
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': output_template,
-        'cookiefile': temp_cookie_file,
-        'noplaylist': True,
-        'quiet': True,
-        'merge_output_format': 'mp4', # التأكد من أن الملف النهائي بصيغة mp4
-    }
+    # تخصيص إعدادات التحميل بناءً على المنصة
+    if "youtube.com" in url or "youtu.be" in url:
+        # إعدادات خاصة ومتقدمة ليوتيوب
+        logger.info("YouTube link detected. Using advanced format selection.")
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': output_template,
+            'cookiefile': temp_cookie_file,
+            'noplaylist': True,
+            'quiet': True,
+            'merge_output_format': 'mp4',
+        }
+    else:
+        # إعدادات بسيطة للمنصات الأخرى (انستغرام، فيسبوك، تيك توك)
+        logger.info("Non-YouTube link detected. Using simple format selection.")
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best', # صيغة أبسط وأكثر توافقية
+            'outtmpl': output_template,
+            'cookiefile': temp_cookie_file,
+            'noplaylist': True,
+            'quiet': True,
+        }
 
     video_path = None
     try:
